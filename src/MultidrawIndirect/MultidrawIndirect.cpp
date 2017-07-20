@@ -39,7 +39,7 @@ namespace
         float d0, d1, d2, d3;
     };
 
-    void setMatrix(Matrix&matrix, float x, float y)
+    void setMatrix(Matrix* matrix, float x, float y)
     {
         /*
         1 0 0 0
@@ -47,19 +47,19 @@ namespace
         0 0 1 0
         x y 0 1
         */
-        matrix.a0 = 1;
-        matrix.a1 = matrix.a2 = matrix.a3 = 0;
+        matrix->a0 = 1;
+        matrix->a1 = matrix->a2 = matrix->a3 = 0;
 
-        matrix.b1 = 1;
-        matrix.b0 = matrix.b2 = matrix.b3 = 0;
+        matrix->b1 = 1;
+        matrix->b0 = matrix->b2 = matrix->b3 = 0;
         
-        matrix.c2 = 1;
-        matrix.c0 = matrix.c1 = matrix.c3 = 0;
+        matrix->c2 = 1;
+        matrix->c0 = matrix->c1 = matrix->c3 = 0;
 
-        matrix.d0 = x;
-        matrix.d1 = y;
-        matrix.d2 = 0;
-        matrix.d3 = 1;
+        matrix->d0 = x;
+        matrix->d1 = y;
+        matrix->d2 = 0;
+        matrix->d3 = 1;
     }
 
     struct SDrawElementsCommand
@@ -179,7 +179,7 @@ void GenerateGeometry()
                 }
             }
             //set position in model matrix
-            setMatrix(vMatrix[matrixIndex++], xOffset, yOffset);
+            setMatrix(&vMatrix[matrixIndex++], xOffset, yOffset);
             xOffset += 0.2f;
         }
         yOffset += 0.2f;
@@ -208,43 +208,6 @@ void GenerateGeometry()
 
     glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, quad_bytes, gQuadIndex.data());
     glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, quad_bytes, triangle_bytes, gTriangleIndex.data());
-
-    //Generate draw commands
-    SDrawElementsCommand vDrawCommand[100];
-    GLuint baseVert = 0;
-    for (unsigned int i(0); i<100; ++i)
-    {
-        if (i % 2 == 0)
-        {
-            vDrawCommand[i].vertexCount = 12;		//4 triangles = 12 vertices
-            vDrawCommand[i].instanceCount = 1;		//Draw 1 instance
-            vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
-            vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
-            vDrawCommand[i].baseInstance = i;		//gl_InstanceID. 
-            baseVert += gQuad.size();
-        }
-        //triangles
-        else
-        {
-            vDrawCommand[i].vertexCount = 3;		//1 triangle = 3 vertices
-            vDrawCommand[i].instanceCount = 1;		//Draw 1 instance
-            vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
-            vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
-            vDrawCommand[i].baseInstance = i;		//gl_InstanceID
-            baseVert += gTriangle.size();
-        }
-    }
-
-    //feed the draw command data to the gpu
-    glGenBuffers(1, &gIndirectBuffer);
-    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, gIndirectBuffer);
-    glBufferData(GL_DRAW_INDIRECT_BUFFER, sizeof(vDrawCommand), vDrawCommand, GL_STATIC_DRAW);
-
-    //feed the instance id to the shader
-    glBindBuffer(GL_ARRAY_BUFFER, gIndirectBuffer);
-    glEnableVertexAttribArray(2);
-    glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, sizeof(SDrawElementsCommand), (void*)(offsetof(DrawElementsCommand, baseInstance)));
-    glVertexAttribDivisor(2, 1); //only once per instance
 
     //Setup per instance matrices
     //Method 1. Use Vertex attributes and the vertex attrib divisor
@@ -331,6 +294,46 @@ GLuint CompileShaders(const GLchar** vertexShaderSource, const GLchar** fragment
     return program;
 }
 
+void generateDrawCommands()
+{
+    //Generate draw commands
+    SDrawElementsCommand vDrawCommand[100];
+    GLuint baseVert = 0;
+    for (unsigned int i(0); i<100; ++i)
+    {
+        if (i % 2 == 0)
+        {
+            vDrawCommand[i].vertexCount = 12;		//4 triangles = 12 vertices
+            vDrawCommand[i].instanceCount = 1;		//Draw 1 instance
+            vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
+            vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
+            vDrawCommand[i].baseInstance = i;		//gl_InstanceID. 
+            baseVert += gQuad.size();
+        }
+        //triangles
+        else
+        {
+            vDrawCommand[i].vertexCount = 3;		//1 triangle = 3 vertices
+            vDrawCommand[i].instanceCount = 1;		//Draw 1 instance
+            vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
+            vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
+            vDrawCommand[i].baseInstance = i;		//gl_InstanceID
+            baseVert += gTriangle.size();
+        }
+    }
+
+    //feed the draw command data to the gpu
+    glGenBuffers(1, &gIndirectBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, gIndirectBuffer);
+    glBufferData(GL_DRAW_INDIRECT_BUFFER, sizeof(vDrawCommand), vDrawCommand, GL_STATIC_DRAW);
+
+    //feed the instance id to the shader.
+    glBindBuffer(GL_ARRAY_BUFFER, gIndirectBuffer);
+    glEnableVertexAttribArray(2);
+    glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, sizeof(SDrawElementsCommand), (void*)(offsetof(DrawElementsCommand, baseInstance)));
+    glVertexAttribDivisor(2, 1); //only once per instance
+}
+
 int main()
 {
 
@@ -369,7 +372,6 @@ int main()
     GenerateGeometry();
     GenerateArrayTexture();
 
-
     // render loop
     while (!glfwWindowShouldClose(window))
     {
@@ -381,13 +383,16 @@ int main()
         // Use program. Not needed in this example since we only have one that
         // we already use
         //glUseProgram(gProgram);
+        
+        generateDrawCommands();
 
-        //populate uniform
+        //populate light uniform
         glUniform2f(glGetUniformLocation(gProgram, "light_pos"), gMouseX, gMouseY);
         
         // Bind the vertex array we want to draw from. Not needed in this example
         // since we only have one that is already bounded
         //glBindVertexArray(gVAO);
+
 
         //draw
         glMultiDrawElementsIndirect(GL_TRIANGLES, //type
@@ -395,8 +400,6 @@ int main()
             (GLvoid*)0, //start with the first draw command
             100, //draw 100 objects
             0); //no stride, the draw commands are tightly packed
-
-
 
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         glfwSwapBuffers(window);
