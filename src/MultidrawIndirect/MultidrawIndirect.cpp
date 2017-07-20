@@ -75,6 +75,7 @@ namespace
         //xy			//uv
         { 0.0f,0.0f,	0.0f,0.0f },
         { 0.1f,0.0f,	1.0f,0.0f },
+        { 0.05f, 0.05f, 0.5f, 0.5f},
         { 0.0f,0.1f,	0.0f,1.0f },
         { 0.1f,0.1f,	1.0f,1.0f }
     };
@@ -88,7 +89,11 @@ namespace
 
     const std::vector<unsigned int> gQuadIndex = {
         0,1,2,
-        1,3,2 };
+        1,4,2,
+        2,4,3,
+        0,2,3
+    };
+
     const std::vector<unsigned int> gTriangleIndex =
     {
         0,1,2
@@ -160,7 +165,7 @@ void GenerateGeometry()
             //quad
             if (j % 2 == 0)
             {
-                for (unsigned int k(0); k != 4; ++k)
+                for (unsigned int k(0); k != gQuad.size(); ++k)
                 {
                     vVertex[vertexIndex++] = gQuad[k];
                 }
@@ -168,7 +173,7 @@ void GenerateGeometry()
             //triangle
             else
             {
-                for (unsigned int k(0); k != 3; ++k)
+                for (unsigned int k(0); k != gTriangle.size(); ++k)
                 {
                     vVertex[vertexIndex++] = gTriangle[k];
                 }
@@ -211,12 +216,12 @@ void GenerateGeometry()
     {
         if (i % 2 == 0)
         {
-            vDrawCommand[i].vertexCount = 6;		//2 triangles = 6 vertices
+            vDrawCommand[i].vertexCount = 12;		//4 triangles = 12 vertices
             vDrawCommand[i].instanceCount = 1;		//Draw 1 instance
             vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
             vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
             vDrawCommand[i].baseInstance = i;		//gl_InstanceID. 
-            baseVert += 4;
+            baseVert += gQuad.size();
         }
         //triangles
         else
@@ -226,7 +231,7 @@ void GenerateGeometry()
             vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
             vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
             vDrawCommand[i].baseInstance = i;		//gl_InstanceID
-            baseVert += 3;
+            baseVert += gTriangle.size();
         }
     }
 
