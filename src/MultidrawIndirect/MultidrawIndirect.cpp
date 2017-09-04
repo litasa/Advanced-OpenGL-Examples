@@ -1,4 +1,4 @@
-//// Based on: https://github.com/fsole/GLSamples/blob/master/src/MultidrawIndirect.cpp
+//// Based on Ferran Soles: https://github.com/fsole/GLSamples/blob/master/src/MultidrawIndirect.cpp
 //// Modified by: Jakob Törmä Ruhl
 
 #include <GL\glew.h>
@@ -39,7 +39,7 @@ namespace
         float d0, d1, d2, d3;
     };
 
-    void setMatrix(Matrix* matrix, float x, float y)
+    void setMatrix(Matrix* matrix, const float x, const float y)
     {
         /*
         1 0 0 0
@@ -102,35 +102,37 @@ namespace
     const GLchar* gVertexShaderSource[] =
     {
         "#version 430 core\n"
+
         "layout (location = 0 ) in vec2 position;\n"
         "layout (location = 1 ) in vec2 texCoord;\n"
-        "layout (location = 3 ) in mat4 instanceMatrix;\n"
         "layout (location = 2 ) in uint drawid;\n"
-        "out vec2 uv;\n"
-        "out vec4 pos;\n"
-        "flat out uint drawID;\n"
+        "layout (location = 3 ) in mat4 instanceMatrix;\n"
+
+        "layout (location = 0 ) out vec2 uv;\n"
+        "layout (location = 1 ) flat out uint drawID;\n"
+
         "void main(void)\n"
         "{\n"
-        "  gl_Position = instanceMatrix * vec4(position,0.0,1.0);\n"
         "  uv = texCoord;\n"
-        "  pos = instanceMatrix * vec4(position,0.0,1.0);\n"
         "  drawID = drawid;\n"
+        "  gl_Position = instanceMatrix * vec4(position,0.0,1.0);\n"
         "}\n"
     };
 
     const GLchar* gFragmentShaderSource[] =
     {
         "#version 430 core\n"
-        "out vec4 color;\n"
-        "in vec2 uv;\n"
-        "in vec4 pos;\n"
-        "flat in uint drawID;\n"
-        "uniform vec2 light_pos;\n"
-        "layout (binding=0) uniform sampler2DArray textureArray;\n"
+
+        "layout (location = 0 ) in vec2 uv;\n"
+        "layout (location = 1 ) flat in uint drawID;\n"
+
+        "layout (location = 0) out vec4 color;\n"
+
+        "layout (binding = 0) uniform sampler2DArray textureArray;\n"
+
         "void main(void)\n"
         "{\n"
-        "  float intensity = 1.0 / length(pos.xy - light_pos);\n"
-        "  color = intensity * texture(textureArray, vec3(uv.x,uv.y,drawID) );\n"
+        "  color = texture(textureArray, vec3(uv.x, uv.y, drawID) );\n"
         "}\n"
     };
 
@@ -155,6 +157,7 @@ void GenerateGeometry()
     Matrix vMatrix[100];
     unsigned vertexIndex(0);
     unsigned matrixIndex(0);
+    //Clipspace, lower left corner = (-1, -1)
     float xOffset(-0.95f);
     float yOffset(-0.95f);
     // populate geometry
@@ -276,10 +279,26 @@ GLuint CompileShaders(const GLchar** vertexShaderSource, const GLchar** fragment
     glShaderSource(vertexShader, 1, vertexShaderSource, NULL);
     glCompileShader(vertexShader);
 
+    int success;
+    char infoLog[1024];
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(vertexShader, 1024, NULL, infoLog);
+        std::cout << "ERROR::SHADER_COMPILATION_ERROR of type: " << infoLog << "\n -- --------------------------------------------------- -- " << std::endl;
+    }
+
     //Compile fragment shader
     GLuint fragmentShader(glCreateShader(GL_FRAGMENT_SHADER));
     glShaderSource(fragmentShader, 1, fragmentShaderSource, NULL);
     glCompileShader(fragmentShader);
+
+     glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(fragmentShader, 1024, NULL, infoLog);
+        std::cout << "ERROR::SHADER_COMPILATION_ERROR of type: " << infoLog << "\n -- --------------------------------------------------- -- " << std::endl;
+    }
 
     //Link vertex and fragment shader together
     GLuint program(glCreateProgram());
@@ -301,16 +320,17 @@ void generateDrawCommands()
     GLuint baseVert = 0;
     for (unsigned int i(0); i<100; ++i)
     {
+        //quad
         if (i % 2 == 0)
         {
             vDrawCommand[i].vertexCount = 12;		//4 triangles = 12 vertices
             vDrawCommand[i].instanceCount = 1;		//Draw 1 instance
             vDrawCommand[i].firstIndex = 0;			//Draw from index 0 for this instance
             vDrawCommand[i].baseVertex = baseVert;	//Starting from baseVert
-            vDrawCommand[i].baseInstance = i;		//gl_InstanceID. 
+            vDrawCommand[i].baseInstance = i;		//gl_InstanceID
             baseVert += gQuad.size();
         }
-        //triangles
+        //triangle
         else
         {
             vDrawCommand[i].vertexCount = 3;		//1 triangle = 3 vertices
@@ -323,9 +343,8 @@ void generateDrawCommands()
     }
 
     //feed the draw command data to the gpu
-    glGenBuffers(1, &gIndirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, gIndirectBuffer);
-    glBufferData(GL_DRAW_INDIRECT_BUFFER, sizeof(vDrawCommand), vDrawCommand, GL_STATIC_DRAW);
+    glBufferData(GL_DRAW_INDIRECT_BUFFER, sizeof(vDrawCommand), vDrawCommand, GL_DYNAMIC_DRAW);
 
     //feed the instance id to the shader.
     glBindBuffer(GL_ARRAY_BUFFER, gIndirectBuffer);
@@ -358,8 +377,6 @@ int main()
 
     glewInit();
 
-    //glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // uncomment this statement to fix compilation on OS X
-
     //Set clear color
     glClearColor(1.0, 1.0, 1.0, 0.0);
 
@@ -367,12 +384,17 @@ int main()
     gProgram = CompileShaders(gVertexShaderSource, gFragmentShaderSource);
     glUseProgram(gProgram);
 
-    glUniform1i(0, 0); //Sampler refers to texture unit 0
-
     GenerateGeometry();
     GenerateArrayTexture();
 
+    //Set the sampler for the texture.
+    //Hacky but we know that the arraysampler is at bindingpoint 0.
+    glUniform1i(0, 0);
+
+    //Generate one indirect draw buffer
+    glGenBuffers(1, &gIndirectBuffer);
     // render loop
+    int i = 0;
     while (!glfwWindowShouldClose(window))
     {
         // input
@@ -383,16 +405,15 @@ int main()
         // Use program. Not needed in this example since we only have one that
         // we already use
         //glUseProgram(gProgram);
-        
-        generateDrawCommands();
 
-        //populate light uniform
-        glUniform2f(glGetUniformLocation(gProgram, "light_pos"), gMouseX, gMouseY);
-        
         // Bind the vertex array we want to draw from. Not needed in this example
         // since we only have one that is already bounded
         //glBindVertexArray(gVAO);
 
+        generateDrawCommands();
+
+        //populate light uniform
+        glUniform2f(glGetUniformLocation(gProgram, "light_pos"), gMouseX, gMouseY);
 
         //draw
         glMultiDrawElementsIndirect(GL_TRIANGLES, //type
